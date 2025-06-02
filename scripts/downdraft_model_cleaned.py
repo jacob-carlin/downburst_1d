@@ -127,6 +127,7 @@ import matplotlib as mpl
 mpl.rcParams['font.family'] = 'PT Sans'
 mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from netCDF4 import Dataset
 from matplotlib.colors import ColorConverter, LinearSegmentedColormap
 from scipy.integrate import simpson
@@ -141,15 +142,15 @@ from siphon.catalog import TDSCatalog
 import pyart
 
 # Import other internal functions
-#cwd = os.getcwd()
-#os.chdir(workdir)
-import src.mh_scattering as rc
-import src.mh_microphysics as mp
+cwd = os.getcwd()
+os.chdir(workdir)
+import mh_scattering as rc
+import mh_microphysics as mp
 import mh_namelist as nm
-import src.mh_thermo as th
-from src.get_hrrr_sounding import *
-from src.mh_thermo import *
-#os.chdir(cwd)
+import mh_thermo as th
+from get_hrrr_sounding import *
+from mh_thermo import *
+os.chdir(cwd)
 
 ###############################################################################
 # Import variables and constants from namelist
@@ -317,6 +318,9 @@ if profile_opt == 0:
         if (np.max(rhenv) > 100.) or (np.min(rhenv) < 0.):
             print('Mixing ratio choice resulting in unrealistic RH profile. Exiting.')
             sys.exit()
+            
+    #  !!!! EXPERIMENT TO MAKE CLOUD LAYER
+    #rhenv[0:5] = 100.0
     
 # Custom input sounding from the University of Wyoming sounding archive website
 # Source: http://weather.uwyo.edu/upperair/sounding.html
@@ -333,8 +337,8 @@ if profile_opt == 1:
 
     for line in lines:
         parts = [float(x) for x in line.split() if x]
-        line_p = parts[1] * 100     # [Pa]
-        line_h = parts[0]           # [m]
+        line_p = parts[0] * 100     # [Pa]
+        line_h = parts[1]           # [m]
         line_t = parts[2]           # [C]
         line_rh = parts[4]          # [%]
 
@@ -348,6 +352,9 @@ if profile_opt == 1:
     h = np.asarray(h)
     t = np.asarray(t)
     rh = np.asarray(rh)
+
+    # Make everything ground relative (m AGL)
+    h -= h[0]
 
     # Find top of domain
     h0 = int(dh * round(float(h[-1]) / dh))
@@ -558,6 +565,7 @@ dvw_evap = np.zeros((nlev, nbin, ntstp))        # Change in water volume due to 
 dvi_subl = np.zeros((nlev, nbin, ntstp))        # Change in ice volume due to sublimation within grid box [m3]
 dvi_melt = np.zeros((nlev, nbin, ntstp))        # Change in ice volume due to melting within grid box[m3]
 dmw = np.zeros((nlev, nbin, ntstp))             # Change in water mass within grid box[kg]
+dmwdt_array = np.zeros((nlev, nbin, ntstp))     # Rate of change of water mass [kg/s]
 tp = np.zeros((nlev, nbin, ntstp))              # Particle temperature [C]
 tp_eq = np.zeros((nlev, nbin, ntstp))           # Equilibrium particle temperature [C] (Defunct?)
 fm = np.zeros((nlev, nbin, ntstp))              # Mass water fraction
@@ -566,7 +574,7 @@ ar = np.zeros((nlev, nbin, ntstp))              # Aspect ratio
 ar_out = np.zeros((nlev, nbin, ntstp))          # Outer aspect ratio
 ar_in = np.zeros((nlev, nbin, ntstp))           # Inner (core) aspect ratio
 arend = np.zeros((nlev, nbin, ntstp))           # Aspect ratio of equivalent-mass raindrops
-dsdm = np.zeros((nlev, nbin, ntstp))            # Particle PSD [m-3]
+dsdm = np.zeros((nlev, nbin, ntstp))            # Particle concentration mixing ratio [kg-1]
 mitot = np.zeros((nlev, ntstp))                 # Total IWC [g/m3]
 mwtot = np.zeros((nlev, ntstp))                 # Total LWC (retained on particles) [g/m3]
 sensible_flux = np.zeros((nlev, nbin, ntstp))   # Sensible heat term via conduction
@@ -771,7 +779,10 @@ rh[:, 0] = rhenv
 # conditions for cloud base from Srivastava et al. (1987) 
 # (namely w = -1 m/s and RH = 100%)
 rh[0, :] = 100.0
+#rh[0, :] = rhenv[0]
+
 w[0, :] = -1.0
+#w[0, :] = 0.0
 
 # Calculate the rest of downdraft environmental variables
 es[:, 0] = sat_vapor_p(t[:, 0])
@@ -793,6 +804,8 @@ kwa[:, 0] = thermal_conductivity_water(tk[:, 0])
 dv[:, 0] = thermal_diffusivity_water(tk[:, 0], p[:, 0])
 pr[:, 0] = nu[:, 0] / ka[:, 0]
 sc[:, 0] = nu[:, 0] / dv[:, 0]
+
+print('Initial air density:', ra[0, 0])
 
 ###############################################################################
 ############## Initialization of particles at freezing level ##################
@@ -855,14 +868,14 @@ for tstp in range(ntstp-1):
         if dsd_norm: # Normalized rain DSD
             f_mu = (6 * (4 + mur)**(4 + mur)) / (4**4 * sp.special.gamma(4 + mur))
             dsdm[0, :, tstp] = (np.where(d[0, :, tstp] <= (1e-3 * dmax_limit),
-                                         deld * (nrw * f_mu * ((d[0, :, tstp] * 1000.) / dmr)**mur * np.exp(-(4 + mur) * (d[0, :, tstp] * 1000.)/dmr)),
+                                         deld * (1 / ra[0, tstp]) * (nrw * f_mu * ((d[0, :, tstp] * 1000.) / dmr)**mur * np.exp(-(4 + mur) * (d[0, :, tstp] * 1000.)/dmr)),
                                          0.0))    
         else: # Gamma rain DSD
             dsdm[0, :, tstp] = (np.where(d[0, :, tstp] <= (1e-3 * dmax_limit),
-                                         deld * (nr0 * (d[0, :, tstp] * 1000.0)**(mur) * np.exp(-lamr * d[0, :, tstp] * 1000.0)),
+                                         deld * (1 / ra[0, tstp]) * (nr0 * (d[0, :, tstp] * 1000.0)**(mur) * np.exp(-lamr * d[0, :, tstp] * 1000.0)),
                                          0.0))        
         
-        mwtot[0, tstp] = np.nansum(mw[0, :, tstp] * dsdm[0, :, tstp]) * 1000.0
+        mwtot[0, tstp] = np.nansum(mw[0, :, tstp] * dsdm[0, :, tstp] * ra[0, tstp]) * 1000.0
         qp[0, tstp] = 1e-3 * mwtot[0, tstp] / rad[0, tstp]
         vent_ratio = np.nanmean(fv[0, :, tstp] / fh[0, :, tstp]) # Use mean ratio for computational efficiency
         tp[0, :, tstp] = (optimize.minimize_scalar(mp.tp_conv_evap, 
@@ -948,12 +961,12 @@ for tstp in range(ntstp-1):
         
         # Bi-exponential particle size distribution in m-3
         dsdm[0, :, tstp] = (np.where(d[0, :, tstp] <= (1e-3 * dmax_limit),
-                                     deld * (nh0 * np.exp(-lamh * d[0, :, tstp] * 1000.0) +
-                                             ng0 * np.exp(-lamg * d[0, :, tstp] * 1000.0)),
+                                     deld * (1 / ra[0, tstp]) * (nh0 * np.exp(-lamh * d[0, :, tstp] * 1000.0) +
+                                                                 ng0 * np.exp(-lamg * d[0, :, tstp] * 1000.0)),
                                      0.0))       
             
-        mitot[0, tstp] = np.nansum(mi[0, :, tstp] * dsdm[0, :, tstp]) * 1000.0 # [g]
-        qp[0, tstp] = 1e-3 * mitot[0, tstp] / rad[0, tstp]
+        mitot[0, tstp] = np.nansum(mi[0, :, tstp] * dsdm[0, :, tstp] * ra[0, tstp]) * 1000.0 # [g]
+        qp[0, tstp] = 1e-3 * mitot[0, tstp] / ra[0, tstp]
 
         # Calculate initial particle temperature (Theis et al. 2022, Eq. 14)
         # Note: Because of the assumption of 100% RH at cloud base, this technically results in a 
@@ -1154,6 +1167,7 @@ for tstp in range(ntstp-1):
             estp = sat_vapor_p(tp[hgt, evap_where, tstp])
             drho = (1 / rv) * ((e[hgt, tstp] / (t[hgt, tstp] + t0)) - (estp / (tp[hgt, evap_where, tstp] + t0)))            
             dmwdt = 4 * pi * (0.5 * d[hgt-1, evap_where, tstp]) * dv[hgt, tstp] * fv[hgt, evap_where, tstp] * drho # kg/s
+            dmwdt_array[hgt, evap_where, tstp] = dmwdt
             if evap_opt == False:
                 dmwdt = 0.0
             dTdt_evap[hgt, evap_where, tstp] = (lv / (cp * rad[hgt, tstp]) * dmwdt) # (K m3) / s (Cooling rate per particle)
@@ -1635,7 +1649,7 @@ for tstp in range(ntstp-1):
         
         for hgt in range(0, int(nlev)):
             # Total mass of excess/shed drops
-            mstot[hgt, tstp] = np.nansum(mw_shed[hgt, :, tstp] * dsdm[hgt, :, tstp]) * 1000.0 # g
+            mstot[hgt, tstp] = np.nansum(mw_shed[hgt, :, tstp] * dsdm[hgt, :, tstp] * ra[hgt, tstp]) * 1000.0 # g
             if mstot[hgt, tstp] > 0.0:
                 shed_where = np.where((mi[hgt, :, tstp] == 0.0) & (d[hgt, :, tstp] < 6e-3))[0]
                 # shed_where are the bins to redistribute shed drops INTO
@@ -1696,7 +1710,7 @@ for tstp in range(ntstp-1):
                     ##########################################################
                     
                     # Add drops into existing distribution
-                    dsdm[hgt, shed_where, tstp] += dsd_shed[hgt, shed_where, tstp]
+                    dsdm[hgt, shed_where, tstp] += (dsd_shed[hgt, shed_where, tstp] / ra[hgt, tstp])
                     vw[hgt, shed_where, tstp] = (pi/6) * d[hgt, shed_where, tstp]**3
                     mw[hgt, shed_where, tstp] = rw * vw[hgt, shed_where, tstp]
                     mw_outside[hgt, shed_where, tstp] = mw[hgt, shed_where, tstp]
@@ -1715,7 +1729,7 @@ for tstp in range(ntstp-1):
                 elif len(shed_where) == 1: # All shed drops go to single size bin
                     print('Warning: Only one size bin available for shed drops.')
                     dsd_shed[hgt, shed_where, tstp] = (1e-3 * mstot[hgt, tstp] / mw[hgt, shed_where, tstp])
-                    dsdm[hgt, shed_where, tstp] += dsd_shed[hgt, shed_where, tstp]
+                    dsdm[hgt, shed_where, tstp] += (dsd_shed[hgt, shed_where, tstp] / ra[hgt, tstp])
                     
                     
     ###############################################################################
@@ -1736,7 +1750,7 @@ for tstp in range(ntstp-1):
         
         for hgt in range(1, nlev):
             # Follow analogous procedure as shed drops weighted by the probability of breakup
-            mbtot[hgt, tstp] = 1e3 * np.nansum(mw[hgt, :, tstp] * dsdm[hgt, :, tstp] * breakup_prob[hgt, :, tstp]) # g/m3 -- Total breakup (including from above)
+            mbtot[hgt, tstp] = 1e3 * np.nansum(mw[hgt, :, tstp] * dsdm[hgt, :, tstp] * breakup_prob[hgt, :, tstp] * ra[hgt, tstp]) # g/m3 -- Total breakup (including from above)
             if mbtot[hgt, tstp] > 0:
                 dsdm[hgt, :, tstp] = dsdm[hgt, :, tstp] * (1 - breakup_prob[hgt, :, tstp]) # Reduce droplets that have actually broken up
                 breakup_where = np.where((fm[hgt, :, tstp] == 1.0) & ((1e3 * d[hgt, :, tstp]) < 4.0) & ((1e3 * d[hgt, :, tstp]) > 0.0))[0]
@@ -1748,42 +1762,39 @@ for tstp in range(ntstp-1):
                                     simpson((d_breakup**3. * np.exp(-lam_bu * d_breakup)), x=d_breakup, dx=dd_breakup, even='avg'))            
                 dsd_breakup[hgt, breakup_where, tstp] = nbd[hgt, tstp] * np.exp(-lam_bu * d_breakup) * dd_breakup
                 
-                dsdm[hgt, breakup_where, tstp] += dsd_breakup[hgt, breakup_where, tstp]
+                dsdm[hgt, breakup_where, tstp] += (dsd_breakup[hgt, breakup_where, tstp] / ra[hgt, tstp])
                 
     ###########################################################################
     # Calculate total mass contents
     ###########################################################################
 
     # Total IWC and LWC [g/m3]
-    mitot[:, tstp] = np.nansum(mi[:, :, tstp] * dsdm[:, :, tstp], axis=1) * 1000.0  # To convert to g
-    mwtot[:, tstp] = np.nansum(mw[:, :, tstp] * dsdm[:, :, tstp], axis=1) * 1000.0
+    mitot[:, tstp] = np.nansum(mi[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1) * 1000.0  # To convert to g/m3
+    mwtot[:, tstp] = np.nansum(mw[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1) * 1000.0  # g/m3
 
     # Total precipitation mixing ratio [kg/kg]
-    qp[:, tstp] = 1e-3 * (mitot[:, tstp] + mwtot[:, tstp]) / rad[:, tstp] # kg/kg
+    qp[:, tstp] = 1e-3 * (mitot[:, tstp] + mwtot[:, tstp]) / ra[:, tstp] # Back to kg/kg
     # Note: mstot not included here because the water is already redistributed into mwtot
-
-    # Note this is the total precipitation rate, rather than the RAINRATE. (!!! Not tested)
-    preciprate[:, tstp] = 3.6 * 1e-3 * (pi/6) * np.nansum(dsdm[:, :, tstp] * u[:, :, tstp] * (1e3*d[:, :, tstp])**3, axis=1)
-    preciprate_w[:, tstp] = np.nansum((v[:, :, tstp] * (u[:, :, tstp] - w[:, None, tstp]) * dsdm[:, :, tstp]), axis=1) * 3600 * 1000 # mm/hr
-    for hgt in range(0, int(nlev)):
-        melted_where = np.where(fm[hgt, :, tstp] == 1.0)[0]
-        # Only included *fully-melted bins* in the rainrate calculation
-        rainrate[hgt, tstp] = np.nansum((v[hgt, melted_where, tstp] * u[hgt, melted_where, tstp] * dsdm[hgt, melted_where, tstp])) * 3600 * 1000 # mm/hr
-        rainrate_w[hgt, tstp] = np.nansum((v[hgt, melted_where, tstp] * (u[hgt, melted_where, tstp] - w[hgt, None, tstp]) * dsdm[hgt, melted_where, tstp])) * 3600 * 1000 # mm/hr
-
+    
+    preciprate[:, tstp] = 3600 * 1e3 * np.nansum(v[:, :, tstp] * dsdm[:, :, tstp] * u[:, :, tstp] * ra[:, None, tstp], axis=1)
+    preciprate_w[:, tstp] = 3600 * 1e3 * np.nansum((v[:, :, tstp] * (u[:, :, tstp] - w[:, None, tstp]) * dsdm[:, :, tstp] * ra[:, None, tstp]), axis=1) # mm/hr
+    
+    rainrate[:, tstp] = 3600 * 1e3 * np.nansum((mw[:, :, tstp] / rw) * u[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)
+    rainrate_w[:, tstp] = 3600 * 1e3 * np.nansum((mw[:, :, tstp] / rw) * (u[:, :, tstp] - w[:, None, tstp]) * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)
+    
     ###############################################################################
     # Latent heating and cooling rates:
     ###############################################################################
     
     # Integrate heating/cooling rate along entire PSD
     for hgt in range(0, int(nlev)):
-        dTdt_melt_tot[hgt, tstp] = np.nansum(dTdt_melt[hgt, :, tstp] * dsdm[hgt, :, tstp])  # [K/s]
+        dTdt_melt_tot[hgt, tstp] = np.nansum(dTdt_melt[hgt, :, tstp] * dsdm[hgt, :, tstp] * ra[hgt, tstp])  # [K/s]
         if subl_opt:
-            dTdt_subl_tot[hgt, tstp] = np.nansum(dTdt_subl[hgt, :, tstp] * dsdm[hgt, :, tstp])  # [K/s]
+            dTdt_subl_tot[hgt, tstp] = np.nansum(dTdt_subl[hgt, :, tstp] * dsdm[hgt, :, tstp] * ra[hgt, tstp])  # [K/s]
         if evap_opt:
-            dTdt_evap_tot[hgt, tstp] = np.nansum(dTdt_evap[hgt, :, tstp] * dsdm[hgt, :, tstp])
+            dTdt_evap_tot[hgt, tstp] = np.nansum(dTdt_evap[hgt, :, tstp] * dsdm[hgt, :, tstp] * ra[hgt, tstp])
         dTdt_tot[hgt, tstp] = dTdt_melt_tot[hgt, tstp] + dTdt_subl_tot[hgt, tstp] + dTdt_evap_tot[hgt, tstp]  # K s-1
-        dqdt_tot[hgt, tstp] = np.nansum(dqdt[hgt, :, tstp] * dsdm[hgt, :, tstp])  # (kg kg-1) s-1
+        dqdt_tot[hgt, tstp] = np.nansum(dqdt[hgt, :, tstp] * dsdm[hgt, :, tstp] * ra[hgt, tstp])  # (kg kg-1) s-1
 
     ###############################################################################
     # Update downdraft environment for tstp + 1
@@ -1792,25 +1803,25 @@ for tstp in range(ntstp-1):
     # Fixing parameters at the top of the domain to be constant:
     if init_frozen_opt:
         dsdm[0, :, tstp+1] = (np.where(d[0, :, tstp] <= 1e-3*dmax_limit,
-                                       deld * (nh0 * np.exp(-lamh * d[0, :, tstp] * 1000.0) +
+                                       deld * (1 / ra[0, tstp]) * (nh0 * np.exp(-lamh * d[0, :, tstp] * 1000.0) +
                                                ng0 * np.exp(-lamg * d[0, :, tstp] * 1000.0)),
                                        0.0))
     else:
         if dsd_norm:
             f_mu = (6 * (4 + mur)**(4 + mur)) / (4**4 * sp.special.gamma(4 + mur))
             dsdm[0, :, tstp+1] = (np.where(d[0, :, tstp] <= 1e-3*dmax_limit,
-                                         deld * (nrw * f_mu * ((d[0, :, tstp] * 1000.) / dmr)**mur * np.exp(-(4 + mur) * (d[0, :, tstp] * 1000.)/dmr)),
+                                         deld * (1 / ra[0, tstp]) * (nrw * f_mu * ((d[0, :, tstp] * 1000.) / dmr)**mur * np.exp(-(4 + mur) * (d[0, :, tstp] * 1000.)/dmr)),
                                          0.0))    
         else:
             dsdm[0, :, tstp+1] = (np.where(d[0, :, tstp] <= 1e-3*dmax_limit,
-                                         deld * (nr0 * (d[0, :, tstp] * 1000.0)**(mur) * np.exp(-lamr * d[0, :, tstp] * 1000.0)),
+                                         deld * (1 / ra[0, tstp]) * (nr0 * (d[0, :, tstp] * 1000.0)**(mur) * np.exp(-lamr * d[0, :, tstp] * 1000.0)),
                                          0.0)) 
             
     h[0, tstp+1] = h[0, 0]
     qstar[0, tstp+1] = q[0, 0]
     u_weighted[0, tstp+1] = (np.average(u[0, :, tstp],
                                         weights  = ((mi[0, :, tstp] + mw[0, :, tstp]) * dsdm[0, :, tstp+1])))
-    w[0, tstp+1] = -1.0
+    w[0, tstp+1] = w[0, 0]
     p[0, tstp+1] = p[0, tstp]
     t[0, tstp+1] = t[0, tstp]
     rh[0, tstp+1] = rh[0, tstp]
@@ -1832,26 +1843,6 @@ for tstp in range(ntstp-1):
     kwa[0, tstp+1] = thermal_conductivity_water(tk[0, tstp+1])
     pr[0, tstp+1] = nu[0, tstp+1] / ka[0, tstp+1]
     sc[0, tstp+1] = nu[0, tstp+1] / dv[0, tstp+1]
-
-    # Updating particle concentrations (Eq. 18 of S87)
-    for ii in range(nbin):
-        dN_term1[1:, ii, tstp] = dsdm[1:, ii, tstp] * ((u[1:, ii, tstp] / ra[1:, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh) + (-np.ediff1d(u[:, ii, tstp]) / dh))
-        #dN_term1[1:, ii, tstp] = dsdm[1:, ii, tstp] * (((w[1:, tstp] - u[1:, ii, tstp]) / ra[1:, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh) + (-np.ediff1d((w[:, tstp] - u[:, ii, tstp])) / dh))
-        idx = np.where(np.abs(dN_term1[:, ii, tstp]) < 1e-10) # QC
-        dN_term1[idx, ii, tstp] = 0.0
-
-        dN_term2[1:, ii, tstp] = -(w[1:, tstp] - u[1:, ii, tstp]) * (-np.ediff1d(dsdm[:, ii, tstp]) / dh)
-        idx = np.where(np.abs(dN_term2[:, ii, tstp]) < 1e-10) # QC
-        dN_term2[idx, ii, tstp] = 0.0
-        
-        # This and other mixing terms were in S85 but not S87. However, they are 
-        # very small in comparison with the other terms.
-        dN_term3[1:, ii, tstp] = -mix_coef * np.abs(w[1:, tstp]) * dsdm[1:, ii, tstp]
-        idx = np.where(np.abs(dN_term3[:, ii, tstp]) < 1e-10) #QC
-        dN_term3[idx, ii, tstp] = 0.0
-
-        dsdm[1:, ii, tstp+1] = np.maximum(dsdm[1:, ii, tstp] + delt * (dN_term1[1:, ii, tstp] + dN_term2[1:, ii, tstp] + dN_term3[1:, ii, tstp]), 0.0)
-        #dsdm[1:, ii, tstp+1] = dsdm[0, ii, tstp] * u[0, ii, tstp] / u[1:, ii, tstp]
 
     # Update equivalent temperature (Eq. 19 of S87)
     # Adiabatic warming
@@ -1889,7 +1880,6 @@ for tstp in range(ntstp-1):
 
     # Calculate mass-weighted terminal velocity
     for hgt in range(nlev):
-        #if (len(np.nonzero(dsdm[hgt, :, tstp])[0]) > 0) and (np.nansum(mi[hgt, :, tstp] + mw[hgt, :, tstp]) > 0):
         if np.nansum(dsdm[hgt, :, tstp] * (mi[hgt, :, tstp] + mw[hgt, :, tstp])) > 0.0:
             u_weighted[hgt, tstp] = np.average(u[hgt, :, tstp], weights  = ((mi[hgt, :, tstp] + mw[hgt, :, tstp]) * dsdm[hgt, :, tstp]))
         else:
@@ -1936,6 +1926,7 @@ for tstp in range(ntstp-1):
             q[hgt, tstp+1] = qstar[hgt, tstp+1]
             qc[hgt, tstp+1] = 0.0
         else:
+            print('Saturation adjustment being applied!')
             x = qs_guess
             t_guess = h[hgt, tstp+1] - ((lv * x) / cp) - t0
             es_guess = 611.21 * np.exp((18.678 - (t_guess / 234.5)) * (t_guess / (257.14 + t_guess)))
@@ -1978,6 +1969,49 @@ for tstp in range(ntstp-1):
     dv[1:, tstp+1] = thermal_diffusivity_water(tk[1:, tstp+1], p[1:, tstp+1])
     sc[1:, tstp+1] = nu[1:, tstp+1] / dv[1:, tstp+1]
         
+        
+    # Updating particle concentrations (Eq. 18 of S87)
+    # JTC 3/28/25: I have derived this from Srivastava (1985)'s Eq. (5) and keep ending up with (w-Vt) terms
+    # in dN_term1. Results are consistent with S85 when only using Vt as written in the paper, but I haven't
+    # figured out where the w terms go in the expansion of the derivatives. For now proceed by assuming 
+    # only including the Vt terms are correct. Note that in dN_term1, the rho_a derivative is the TOTAL derivative
+    # with respect to z and is therefore equivalent to (w-Vt)*Drho/Dz = drho/dt + (w-Vt)drho/dz. This hardly
+    # changes the results but was not in the original equation. 
+    for ii in range(nbin):
+        #dN_term1[1:, ii, tstp] = dsdm[1:, ii, tstp] * ((u[1:, ii, tstp] / ra[1:, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh) + (-np.ediff1d(u[:, ii, tstp]) / dh))
+        #dN_term1[1:, ii, tstp] = dsdm[1:, ii, tstp] * ((1 / ra[1:, tstp]) * (((ra[1:, tstp+1] - ra[1:, tstp]) / delt) + (u[1:, ii, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh)) + (-np.ediff1d(u[:, ii, tstp]) / dh))
+        dN_term1[1:, ii, tstp] = dsdm[1:, ii, tstp] * ((1 / ra[1:, tstp]) * ((u[1:, ii, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh)) + (-np.ediff1d(u[:, ii, tstp]) / dh))
+        
+        # !!! JTC 4/7/2025 Fixed to reflect understanding that in Srivatava paper, n was in kg-1, not m-3!!!!
+
+        #dN_term1[1:, ii, tstp] = -dsdm[:-1, ii, tstp] * (-np.ediff1d(w[:, tstp] - u[:, ii, tstp]) / dh)
+        
+        # !!! JTC Experimenting 4/8/2025: Expanding from S85's Eq. 6 but substituting in N/rho = n:
+        #term_a = (dsdm[1:, ii, tstp] / ra[1:, tstp]) * ((ra[1:, tstp+1] - ra[1:, tstp]) / delt)
+        #term_b = (w[1:, tstp] - u[1:, ii, tstp]) * (dsdm[1:, ii, tstp] / ra[1:, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh)
+        #term_c = (dsdm[1:, ii, tstp]) * (-np.ediff1d(u[:, ii, tstp]) / dh)
+        #term_d = (u[1:, ii, tstp]) * (dsdm[1:, ii, tstp] / ra[1:, tstp]) * (((ra[1:, tstp+1] - ra[1:, tstp]) / delt) + (1 / (w[1:, tstp] - u[1:, ii, tstp]) * (-np.ediff1d(ra[:, tstp]) / dh)))
+        #dN_term1[1:, ii, tstp] = term_a + term_b + term_c + term_d
+        
+        # !!! JTC Experimenting 4/8/2025: Expanding from S85's Eq. 5 but substituting in N:
+        #dN_term1[1:, ii, tstp] = -dsdm[1:, ii, tstp] * (-np.ediff1d(w[:, tstp] - u[:, ii, tstp]) / dh)
+
+        
+        idx = np.where(np.abs(dN_term1[:, ii, tstp]) < 1e-10) # QC
+        dN_term1[idx, ii, tstp] = 0.0
+
+        dN_term2[1:, ii, tstp] = -(w[1:, tstp] - u[1:, ii, tstp]) * (-np.ediff1d(dsdm[:, ii, tstp]) / dh)
+        idx = np.where(np.abs(dN_term2[:, ii, tstp]) < 1e-10) # QC
+        dN_term2[idx, ii, tstp] = 0.0
+        
+        # This and other mixing terms were in S85 but not S87. However, they are 
+        # very small in comparison with the other terms.
+        dN_term3[1:, ii, tstp] = -mix_coef * np.abs(w[1:, tstp]) * dsdm[1:, ii, tstp]
+        idx = np.where(np.abs(dN_term3[:, ii, tstp]) < 1e-10) #QC
+        dN_term3[idx, ii, tstp] = 0.0
+
+        dsdm[1:, ii, tstp+1] = np.maximum(dsdm[1:, ii, tstp] + delt * (dN_term1[1:, ii, tstp] + dN_term2[1:, ii, tstp] + dN_term3[1:, ii, tstp]), 0.0)
+        
     # Update vertical velocity field (Eq. 24 of S87)
     # Vertical advection
     dw_term1[1:, tstp] = -w[1:, tstp] * (-np.ediff1d(w[:, tstp]) / dh)
@@ -2000,12 +2034,15 @@ for tstp in range(ntstp-1):
     dw_term4[idx, tstp] = 0.0
 
     w[1:, tstp+1] = w[1:, tstp] + delt * (dw_term1[1:, tstp] + dw_term2[1:, tstp] + dw_term3[1:, tstp] + dw_term4[1:, tstp])
+    
+    # !!! Testing to manually control downdraft#
+    #w[:, tstp+1] = 0.0
 
     # !!!! Test to fix w = 0 at surface and decrease the w starting at 500 m AGL
-    # min_w_height = 500.
-    # min_w_idxs = np.where(heights <= min_w_height)[0]
-    # w[min_w_idxs, tstp+1] = (np.maximum(w[min_w_idxs[0], tstp+1] * sp.special.erf(heights[min_w_idxs] / (0.5 * min_w_height)),
-    #                                     w[min_w_idxs, tstp+1]))
+    #min_w_height = 500.
+    #min_w_idxs = np.where(heights <= min_w_height)[0]
+    #w[min_w_idxs, tstp+1] = (np.maximum(w[min_w_idxs[0], tstp+1] * sp.special.erf(heights[min_w_idxs] / (0.5 * min_w_height)),
+    #                                    w[min_w_idxs, tstp+1]))
     
     # Calculate surface wind, temperature, and dewpoint for simulated meteogram
     sfc_wind[tstp] = np.round(-1.5 * w[-1, tstp] * 2.23694, 3) # MPH
@@ -2162,7 +2199,7 @@ for tstp in range(ntstp-1): #!!!
             
             # Resonance parameter
             resonance_param = (1e3 * d[:, :, tstp]) * np.sqrt(np.real(eps_comb)) / wave
-            resonance_where = resonance_param > 20.0 # Arbitrary choice
+            resonance_where = resonance_param > 0.4 # Arbitrary choice
             
             if np.count_nonzero(resonance_where) > 0:
                 dout_idx = np.interp(1e3 * d[resonance_where, tstp], d_vec, np.arange(len(d_vec)))
@@ -2197,16 +2234,16 @@ for tstp in range(ntstp-1): #!!!
         ldri[:, :, tstp] = [rc.calc_ldr(x, y, a5) for x, y, a5 in zip(fhh_180[:, :, tstp], fvv_180[:, :, tstp], ang5)]
 
         # Sum over PSD and convert to standard units, etc.
-        zp[:, tstp] = 10 * np.log10(np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp], axis=1)) # [dBZ]
-        zdrp[:, tstp] = (10 * np.log10((np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp], axis=1)) /
-                                 (np.nansum(zvni[:, :, tstp] * dsdm[:, :, tstp], axis=1)))) # [dB]
-        kdpp[:, tstp] = np.nansum(kdpi[:, :, tstp] * dsdm[:, :, tstp], axis=1)  # [deg/km]
-        ahp[:, tstp] = np.nansum(ahi[:, :, tstp] * dsdm[:, :, tstp], axis=1)  # [dB/km]
-        adpp[:, tstp] = np.nansum(adpi[:, :, tstp] * dsdm[:, :, tstp], axis=1)  # [dB/km]
-        delp[:, tstp] = ((180 / pi) * np.arctan2(np.nansum(-np.imag(deli[:, :, tstp]) * dsdm[:, :, tstp], axis=1),
-                                                  np.nansum(np.real(deli[:, :, tstp]) * dsdm[:, :, tstp], axis=1))) # [deg] # Not sure if correct?
-        ldrp[:, tstp] = 10 * np.log10(np.nansum(ldri[:, :, tstp] * dsdm[:, :, tstp], axis=1) / (10 ** (0.1 * zp[:, tstp])))
-        rhvp[:, tstp] = abs(np.nansum(deli[:, :, tstp] * dsdm[:, :, tstp], axis=1)) / np.sqrt((np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp], axis=1) * np.nansum(zvni[:, :, tstp] * dsdm[:, :, tstp], axis=1)))
+        zp[:, tstp] = 10 * np.log10(np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)) # [dBZ]
+        zdrp[:, tstp] = (10 * np.log10((np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)) /
+                                 (np.nansum(zvni[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)))) # [dB]
+        kdpp[:, tstp] = np.nansum(kdpi[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)  # [deg/km]
+        ahp[:, tstp] = np.nansum(ahi[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)  # [dB/km]
+        adpp[:, tstp] = np.nansum(adpi[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)  # [dB/km]
+        delp[:, tstp] = ((180 / pi) * np.arctan2(np.nansum(-np.imag(deli[:, :, tstp]) * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1),
+                                                  np.nansum(np.real(deli[:, :, tstp]) * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1))) # [deg] # Not sure if correct?
+        ldrp[:, tstp] = 10 * np.log10(np.nansum(ldri[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1) / (10 ** (0.1 * zp[:, tstp])))
+        rhvp[:, tstp] = abs(np.nansum(deli[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)) / np.sqrt((np.nansum(zhni[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1) * np.nansum(zvni[:, :, tstp] * dsdm[:, :, tstp] * ra[:, None, tstp], axis=1)))
 
 ###############################################################################
 # Substitute in hgt = 1 radar variables at hgt = 0 for plotting purposes
@@ -2310,7 +2347,7 @@ if write_netcdf:
     nc_ldrp[:, :] = ldrp[:, :]
     
     nc_dsdm = output_file.createVariable('dsdm', 'f8', ('height', 'bin', 'time'))
-    nc_dsdm.units = 'm^-3'
+    nc_dsdm.units = 'kg^-1'
     nc_dsdm.long_name = 'Particle number concentration'
     nc_dsdm[:, :, :] = dsdm[:, :, :]
     
@@ -2378,11 +2415,31 @@ if write_netcdf:
     nc_dqdt.units = 'kg/s'
     nc_dqdt.long_name = 'Particle rate of moisture transfer'
     nc_dqdt[:, :, :] = dqdt[:, :, :]
+    
+    nc_dmwdt = output_file.createVariable('dmwdt', 'f8', ('height', 'bin', 'time'))
+    nc_dmwdt.units = 'kg/s'
+    nc_dmwdt.long_name = 'Rate of evaporation'
+    nc_dmwdt[:, :, :] = dmwdt_array[:, :, :]
 
     nc_dTdt = output_file.createVariable('dTdt', 'f8', ('height', 'bin', 'time'))
     nc_dTdt.units = 'K/s'
     nc_dTdt.long_name = 'Particle rate of temperature change'
     nc_dTdt[:, :, :] = dTdt_evap[:, :, :] + dTdt_subl[:, :, :] + dTdt_melt[:, :, :]
+
+    nc_dTdt_subl = output_file.createVariable('dTdt_subl', 'f8', ('height', 'bin', 'time'))
+    nc_dTdt_subl.units = 'K/s'
+    nc_dTdt_subl.long_name = 'Particle rate of temperature change due to sublimation'
+    nc_dTdt_subl[:, :, :] = dTdt_subl[:, :, :]
+    
+    nc_dTdt_evap = output_file.createVariable('dTdt_evap', 'f8', ('height', 'bin', 'time'))
+    nc_dTdt_evap.units = 'K/s'
+    nc_dTdt_evap.long_name = 'Particle rate of temperature change due to evaporation'
+    nc_dTdt_evap[:, :, :] = dTdt_evap[:, :, :]
+    
+    nc_dTdt_melt = output_file.createVariable('dTdt_melt', 'f8', ('height', 'bin', 'time'))
+    nc_dTdt_melt.units = 'K/s'
+    nc_dTdt_melt.long_name = 'Particle rate of temperature change due to melting'
+    nc_dTdt_melt[:, :, :] = dTdt_melt[:, :, :]
     
     nc_mitot = output_file.createVariable('mitot', 'f8', ('height', 'time'))
     nc_mitot.units = 'g/m3'
@@ -2433,6 +2490,11 @@ if write_netcdf:
     nc_rh.units = '%'
     nc_rh.long_name = 'Relative Humidity'
     nc_rh[:, :] = rh[:, :]
+    
+    nc_ra = output_file.createVariable('ra', 'f8', ('height', 'time'))
+    nc_ra.units = 'kg/m3'
+    nc_ra.long_name = 'Air density'
+    nc_ra[:, :] = ra[:, :]
 
     nc_q = output_file.createVariable('q', 'f8', ('height', 'time'))
     nc_q.units = 'kg/kg'
@@ -2558,11 +2620,11 @@ if make_plots:
     # Ice mixing ratio
     fig = plt.figure(figsize=(3.5, 5))
     plt.plot(mitot[:, time_del_idx]/ra[:, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
-    plt.plot(mitot[:, time_del_idx*2]/ra[:, time_del_idx], heights*1e-3, label='200 s', lw=3, color=colors[3]);
-    plt.plot(mitot[:, time_del_idx*3]/ra[:, time_del_idx], heights*1e-3, label='300 s', lw=3, color=colors[4]);
-    plt.plot(mitot[:, time_del_idx*4]/ra[:, time_del_idx], heights*1e-3, label='400 s', lw=3, color=colors[5]);
-    plt.plot(mitot[:, time_del_idx*5]/ra[:, time_del_idx], heights*1e-3, label='500 s', lw=3, color=colors[6]);
-    plt.plot(mitot[:, time_del_idx*6]/ra[:, time_del_idx], heights*1e-3, label='600 s', lw=3, color='k');
+    plt.plot(mitot[:, time_del_idx*2]/ra[:, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(mitot[:, time_del_idx*3]/ra[:, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(mitot[:, time_del_idx*4]/ra[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(mitot[:, time_del_idx*5]/ra[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(mitot[:, time_del_idx*6]/ra[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
     plt.legend()
     plt.title(r'$q_{\mathrm{i}}$')
     plt.xlim(0, 6)
@@ -2572,7 +2634,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qi_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qi_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, mitot/ra, vmin=0, vmax=5, cmap='BuPu')
@@ -2584,11 +2646,148 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'g kg$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
+    #plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
     plt.text(25, 0.2, 'b', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qi_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qi_TH_control.png', dpi=300, bbox_inches='tight')
+
+# !!!!!!
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dsdm[:, 15, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dsdm[:, 15, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dsdm[:, 15, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dsdm[:, 15, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dsdm[:, 15, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dsdm[:, 15, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dsdm[:, 15, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    plt.legend()
+    plt.title(r'DSD (Bin 15)')
+    plt.xlim(0, 80)
+    #plt.xticks([0, 1, 2, 3, 4, 5, 6])
+    plt.xlabel('kg$^{-1}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_DSDMkg_bin15_profiles_control.png', dpi=300, bbox_inches='tight')
+
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dsdm[:, 15, time_del_idx] * ra[:, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dsdm[:, 15, time_del_idx*2] * ra[:, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dsdm[:, 15, time_del_idx*3] * ra[:, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dsdm[:, 15, time_del_idx*4] * ra[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dsdm[:, 15, time_del_idx*5] * ra[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dsdm[:, 15, time_del_idx*6] * ra[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dsdm[:, 15, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    plt.legend()
+    plt.title(r'DSD (Bin 15)')
+    plt.xlim(0, 80)
+    #plt.xticks([0, 1, 2, 3, 4, 5, 6])
+    plt.xlabel('m$^{-3}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_DSDM_bin15_profiles_control.png', dpi=300, bbox_inches='tight')
+
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(u[:, 15, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(u[:, 15, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(u[:, 15, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(u[:, 15, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(u[:, 15, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(u[:, 15, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(u[:, 15, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    plt.legend()
+    plt.title(r'u (Bin 15)')
+    #plt.xlim(0, 6)
+    #plt.xticks([0, 1, 2, 3, 4, 5, 6])
+    plt.xlabel('m$^{-s}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_u_bin15_profiles_control.png', dpi=300, bbox_inches='tight')
+
+
+    # dN_term1
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dN_term1[:, 15, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dN_term1[:, 15, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dN_term1[:, 15, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dN_term1[:, 15, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dN_term1[:, 15, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dN_term1[:, 15,time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dN_term1[:, 15, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    #plt.legend()
+    plt.title(r'dN Term 1 (Bin 15)')
+    #plt.xlim(-0.025, 0)
+    #plt.xticks([0, 1, 2, 3, 4, 5])
+    plt.xlabel('')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    #plt.text(4.45, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dN_term1_profiles_control.png', dpi=300, bbox_inches='tight')
+        
+    # dN_term2
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dN_term2[:, 15, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dN_term2[:, 15, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dN_term2[:, 15, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dN_term2[:, 15, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dN_term2[:, 15, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dN_term2[:, 15, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dN_term2[:, 15, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    #plt.legend()
+    plt.title(r'dN Term 2 (Bin 15)')
+    plt.xlim(0, 0.8)
+    #plt.xticks([0, 1, 2, 3, 4, 5])
+    plt.xlabel('')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    #plt.text(4.45, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dN_term2_profiles_control.png', dpi=300, bbox_inches='tight')
+
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dsdm[:, 10, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dsdm[:, 10, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dsdm[:, 10, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dsdm[:, 10, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dsdm[:, 10, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dsdm[:, 10, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dsdm[:, 10, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    plt.legend()
+    plt.title(r'DSD (Bin 10)')
+    #plt.xlim(0, 6)
+    #plt.xticks([0, 1, 2, 3, 4, 5, 6])
+    plt.xlabel('kg$^{-1}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_DSDMkg_bin10_profiles_control.png', dpi=300, bbox_inches='tight') 
+        
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(dsdm[:, 5, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(dsdm[:, 5, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(dsdm[:, 5, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(dsdm[:, 5, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(dsdm[:, 5, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(dsdm[:, 5, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(dsdm[:, 5, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    plt.legend()
+    plt.title(r'DSD (Bin 5)')
+    #plt.xlim(0, 6)
+    #plt.xticks([0, 1, 2, 3, 4, 5, 6])
+    plt.xlabel('kg$^{-1}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_DSDMkg_bin05_profiles_control.png', dpi=300, bbox_inches='tight')
+
 
     # Ice IWC
     fig = plt.figure(figsize=(3.5, 5))
@@ -2607,7 +2806,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(0.35, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_iwc_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_iwc_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, mitot, vmin=0, vmax=5, cmap='BuPu')
@@ -2619,20 +2818,19 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'g m$^{-3}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'b', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_iwc_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_iwc_TH_control.png', dpi=300, bbox_inches='tight')
 
     # Water mixing ratio
     fig = plt.figure(figsize=(3.5, 5))
     plt.plot(mwtot[:, time_del_idx]/ra[:, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
-    plt.plot(mwtot[:, time_del_idx*2]/ra[:, time_del_idx], heights*1e-3, label='200 s', lw=3, color=colors[3]);
-    plt.plot(mwtot[:, time_del_idx*3]/ra[:, time_del_idx], heights*1e-3, label='300 s', lw=3, color=colors[4]);
-    plt.plot(mwtot[:, time_del_idx*4]/ra[:, time_del_idx], heights*1e-3, label='400 s', lw=3, color=colors[5]);
-    plt.plot(mwtot[:, time_del_idx*5]/ra[:, time_del_idx], heights*1e-3, label='500 s', lw=3, color=colors[6]);
-    plt.plot(mwtot[:, time_del_idx*6]/ra[:, time_del_idx], heights*1e-3, label='600 s', lw=3, color='k');
+    plt.plot(mwtot[:, time_del_idx*2]/ra[:, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(mwtot[:, time_del_idx*3]/ra[:, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(mwtot[:, time_del_idx*4]/ra[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(mwtot[:, time_del_idx*5]/ra[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(mwtot[:, time_del_idx*6]/ra[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$q_{\mathrm{r}}$')
     plt.xlim(0, 6)
@@ -2642,10 +2840,10 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(5.35, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qr_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qr_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
-    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, mwtot/ra, vmin=0, vmax=5, cmap='BuPu')
+    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, mwtot, vmin=0, vmax=5, cmap='BuPu')
     plt.xlim(0, 600)
     plt.ylim(0, 4)
     plt.xticks([0, 100, 200, 300, 400, 500, 600])
@@ -2654,11 +2852,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'g kg$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qr_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_qr_TH_control.png', dpi=300, bbox_inches='tight')
 
 # Water LWC
     fig = plt.figure(figsize=(3.5, 5))
@@ -2677,7 +2874,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(4.45, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_lwc_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_lwc_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, mwtot, vmin=0, vmax=5, cmap='BuPu')
@@ -2689,13 +2886,81 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'g m$^{-3}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_lwc_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_lwc_TH_control.png', dpi=300, bbox_inches='tight')
 
+    # Rain rate neglecting w
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(rainrate[:, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(rainrate[:, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(rainrate[:, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(rainrate[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(rainrate[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(rainrate[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(rainrate[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    #plt.legend()
+    plt.title(r'Rain rate')
+    plt.xlim(0, 200)
+    plt.xticks([0, 40, 80, 120, 160, 200])
+    plt.xlabel('mm h$^{-1}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    #plt.text(4.45, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_rainrate_profiles_control.png', dpi=300, bbox_inches='tight')
 
+    fig = plt.figure(figsize=(6,5))
+    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, rainrate, vmin=0, vmax=200, cmap='BuPu')
+    plt.xlim(0, 600)
+    plt.ylim(0, 4)
+    plt.xticks([0, 100, 200, 300, 400, 500, 600])
+    plt.yticks(np.arange(0, 4.5, 0.5), labels=['', '', '', '', '', '', '', '', ''])
+    plt.title(r'Rain rate')
+    plt.xlabel('s')
+    plt.ylabel('')
+    plt.colorbar(label=r'mm h$^{-1}$')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
+    plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_rainrate_TH_control.png', dpi=300, bbox_inches='tight')
+
+    # Rain rate including w
+    fig = plt.figure(figsize=(3.5, 5))
+    plt.plot(rainrate_w[:, time_del_idx], heights*1e-3, label='100 s', lw=3, color=colors[2]);
+    plt.plot(rainrate_w[:, time_del_idx*2], heights*1e-3, label='200 s', lw=3, color=colors[3]);
+    plt.plot(rainrate_w[:, time_del_idx*3], heights*1e-3, label='300 s', lw=3, color=colors[4]);
+    plt.plot(rainrate_w[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
+    plt.plot(rainrate_w[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
+    plt.plot(rainrate_w[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(rainrate_w[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
+    #plt.legend()
+    plt.title(r'Rain rate')
+    plt.xlim(0, 200)
+    plt.xticks([0, 40, 80, 120, 160, 200])
+    plt.xlabel('mm h$^{-1}$')
+    plt.ylim(0, 4)
+    plt.ylabel(r'km AGL')
+    #plt.text(4.45, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_rainratew_profiles_control.png', dpi=300, bbox_inches='tight')
+
+    fig = plt.figure(figsize=(6,5))
+    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, rainrate_w, vmin=0, vmax=200, cmap='BuPu')
+    plt.xlim(0, 600)
+    plt.ylim(0, 4)
+    plt.xticks([0, 100, 200, 300, 400, 500, 600])
+    plt.yticks(np.arange(0, 4.5, 0.5), labels=['', '', '', '', '', '', '', '', ''])
+    plt.title(r'Rain rate')
+    plt.xlabel('s')
+    plt.ylabel('')
+    plt.colorbar(label=r'mm h$^{-1}$')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
+    plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_rainratew_TH_control.png', dpi=300, bbox_inches='tight')
+        
 
     # Relative Humidity
     fig = plt.figure(figsize=(3.5, 5))
@@ -2713,7 +2978,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(5, 3.7, 'e', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RH_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RH_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, rh, vmin=0, vmax=100, cmap='BrBG')
@@ -2725,11 +2990,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'%')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'f', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RH_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RH_TH_control.png', dpi=300, bbox_inches='tight')
 
     
     # Vertical velocity
@@ -2749,7 +3013,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(-19, 3.7, 'g', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_w_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_w_profiles_control.png', dpi=300, bbox_inches='tight')
     
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, w, vmin=-20, vmax=20, cmap='RdBu_r')
@@ -2761,11 +3025,19 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'm s$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    w1 = plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
+    line05 = Line2D([0], [0], label=r'-5 m s$^{-1}$', color='k', linestyle='dashed', linewidth=0.5)
+    line10 = Line2D([0], [0], label=r'-10 m s$^{-1}$', color='k', linestyle='dashed', linewidth=1.0)
+    line15 = Line2D([0], [0], label=r'-15 m s$^{-1}$', color='k', linestyle='dashed', linewidth=1.5)
+    #h = w1.collections
+    #l = [f'{a:.1f} m s$^{{-1}}$' for a in w1.levels]
+    #plt.legend(h, l, loc='center left')
+    handles = [line05, line10, line15]
+    plt.legend(handles=handles, loc='center left', fontsize=13)
     plt.text(25, 0.2, 'h', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_w_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_w_TH_control.png', dpi=300, bbox_inches='tight')
+
 
 
 
@@ -2777,6 +3049,7 @@ if make_plots:
     plt.plot(zp[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
     plt.plot(zp[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
     plt.plot(zp[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(zp[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$Z_{\mathrm{H}}$')
     plt.xlim(30, 70)
@@ -2786,7 +3059,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(32, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_Z_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_Z_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, zp, vmin=0, vmax=70, cmap='pyart_ChaseSpectral')
@@ -2798,11 +3071,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label='dBZ')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'b', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_Z_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_Z_TH_control.png', dpi=300, bbox_inches='tight')
 
     # ZDR
     zdrp_tmp = zdrp.copy()
@@ -2815,6 +3087,7 @@ if make_plots:
     plt.plot(zdrp[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
     plt.plot(zdrp[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
     plt.plot(zdrp[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(zdrp[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
     plt.legend()
     plt.title(r'$Z_{\mathrm{DR}}$')
     plt.xlim(0, 4)
@@ -2824,7 +3097,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(0.2, 0.2, 'c', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_ZDR_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_ZDR_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, zdrp, vmin=0, vmax=4, cmap=zdr_cmap_new)
@@ -2836,11 +3109,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label='dB')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_ZDR_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_ZDR_TH_control.png', dpi=300, bbox_inches='tight')
 
     # KDP
     kdpp_tmp = kdpp.copy()
@@ -2853,15 +3125,17 @@ if make_plots:
     plt.plot(kdpp[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
     plt.plot(kdpp[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
     plt.plot(kdpp[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
+    #plt.plot(kdpp[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$K_{\mathrm{dp}}$')
-    plt.xlim(0, 4)
+    plt.xlim(0, 5)
+    plt.xticks([0, 1, 2, 3, 4, 5])
     plt.xlabel(r'$^\circ$ km$^{-1}$')
     plt.ylim(0, 4)
     plt.ylabel(r'km AGL')
     plt.text(3.6, 3.7, 'e', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_KDP_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_KDP_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, kdpp, vmin=0, vmax=8, cmap=zdr_cmap_new)
@@ -2873,11 +3147,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'$^\circ$ km$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'f', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_KDP_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_KDP_TH_control.png', dpi=300, bbox_inches='tight')
 
     
     # AH
@@ -2891,7 +3164,7 @@ if make_plots:
     plt.plot(ahp[:, time_del_idx*4], heights*1e-3, label='400 s', lw=3, color=colors[5]);
     plt.plot(ahp[:, time_del_idx*5], heights*1e-3, label='500 s', lw=3, color=colors[6]);
     plt.plot(ahp[:, time_del_idx*6], heights*1e-3, label='600 s', lw=3, color='k');
-    #plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, ncol=6)
+    #plt.plot(ahp[:, time_del_idx*10], heights*1e-3, label='1000 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$A_{\mathrm{H}}$')
     plt.xlim(0, 0.4)
@@ -2900,7 +3173,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(0.36, 3.7, 'g', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_AH_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_AH_profiles_control.png', dpi=300, bbox_inches='tight')
     
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, ahp, vmin=0, vmax=0.4, cmap='pyart_ChaseSpectral')
@@ -2912,11 +3185,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'dB km$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='w')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='w')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'h', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_AH_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_AH_TH_control.png', dpi=300, bbox_inches='tight')
 
 
     # RhoHV
@@ -2939,7 +3211,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(0.91, 3.7, 'g', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RhoHV_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RhoHV_profiles_control.png', dpi=300, bbox_inches='tight')
     
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, rhvp, vmin=0.90, vmax=1.0, cmap=rhv_cmap)
@@ -2951,11 +3223,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'   ', ticks=[0.90, 0.95, 0.98, 0.99, 1.0])
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='w')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='w')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='white')
     plt.text(25, 0.2, 'h', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RhoHV_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_RhoHV_TH_control.png', dpi=300, bbox_inches='tight')
 
 
 
@@ -2979,7 +3250,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(-7, 3.7, 'a', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_thermal_buoyancy_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_thermal_buoyancy_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, 1e2*g * (tv - tvenv[:, np.newaxis])/tvenv[:, np.newaxis], vmin=-5, vmax=5, cmap='RdBu_r')
@@ -2991,11 +3262,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label='10$^2$ m s$^{-2}$', ticks=[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5])
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'b', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_thermal_buoyancy_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_thermal_buoyancy_TH_control.png', dpi=300, bbox_inches='tight')
 
     # Precipitation Loading
     fig = plt.figure(figsize=(3.5, 5))
@@ -3015,7 +3285,7 @@ if make_plots:
     plt.ylabel(r'km AGL')
     plt.text(-7, 3.7, 'c', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_precip_loading_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_precip_loading_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
     plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, 1e2 * g * -qp, vmin=-5, vmax=5, cmap='RdBu_r')
@@ -3027,11 +3297,10 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label='10$^2$ m s$^{-2}$', ticks=[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5])
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'd', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_precip_loading_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_precip_loading_TH_control.png', dpi=300, bbox_inches='tight')
 
     # dTdt due to melting
     fig = plt.figure(figsize=(3.5, 5))
@@ -3043,16 +3312,17 @@ if make_plots:
     plt.plot((dTdt_melt_tot[:, time_del_idx*6]+dTdt_subl_tot[:, time_del_idx*6])*3600, heights*1e-3, label='600 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$\partial T / \partial t_{\mathrm{melt+subl}}$')
-    plt.xlim(-80, 0)
+    plt.xlim(-100, 0)
+    plt.xticks([-100, -75, -50, -25, 0])
     plt.xlabel(r'K h$^{-1}$')
     plt.ylim(0, 4)
     plt.ylabel(r'km AGL')
-    plt.text(-76, 3.7, 'e', bbox=dict(boxstyle='round', facecolor='white'))
+    plt.text(-114, 3.7, 'e', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_melt_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_melt_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
-    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, (dTdt_melt_tot+dTdt_subl_tot)*3600, vmin=-60, vmax=0, cmap='Blues_r')
+    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, (dTdt_melt_tot+dTdt_subl_tot)*3600, vmin=-80, vmax=0, cmap='Blues_r')
     plt.xlim(0, 600)
     plt.ylim(0, 4)
     plt.xticks([0, 100, 200, 300, 400, 500, 600])
@@ -3061,12 +3331,11 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'K h$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, dTdt_subl_tot*3600, [], linewidths=2, colors='r')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, dTdt_subl_tot*3600, [-0.0001], linewidths=2, colors='r')
     plt.text(25, 0.2, 'f', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_melt_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_melt_TH_control.png', dpi=300, bbox_inches='tight')
 
     
     # dTdt due to evaporation
@@ -3079,16 +3348,17 @@ if make_plots:
     plt.plot(dTdt_evap_tot[:, time_del_idx*6]*3600, heights*1e-3, label='600 s', lw=3, color='k');
     #plt.legend()
     plt.title(r'$\partial T / \partial t_{\mathrm{evap}}$')
-    plt.xlim(-80, 0)
+    plt.xlim(-100, 0)
+    plt.xticks([-100, -75, -50, -25, 0])
     plt.xlabel(r'K h$^{-1}$')
     plt.ylim(0, 4)
     plt.ylabel(r'km AGL')
-    plt.text(-76, 3.7, 'g', bbox=dict(boxstyle='round', facecolor='white'))
+    plt.text(-114, 3.7, 'g', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_evap_profiles_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_evap_profiles_control.png', dpi=300, bbox_inches='tight')
 
     fig = plt.figure(figsize=(6,5))
-    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, dTdt_evap_tot*3600, vmin=-60, vmax=0, cmap='Blues_r')
+    plt.pcolor(np.arange(0, ntstp) * delt, heights*1e-3, dTdt_evap_tot*3600, vmin=-80, vmax=0, cmap='Blues_r')
     plt.xlim(0, 600)
     plt.ylim(0, 4)
     plt.xticks([0, 100, 200, 300, 400, 500, 600])
@@ -3097,15 +3367,35 @@ if make_plots:
     plt.xlabel('s')
     plt.ylabel('')
     plt.colorbar(label=r'K h$^{-1}$')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-40, 0, 10), linewidths=2, colors='k')
-    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, np.arange(-35, 0, 10), linewidths=1, colors='k')
+    plt.contour(np.arange(0, ntstp) * delt, heights*1e-3, w, [-15, -10, -5], linestyles='dashed', linewidths=[1.5, 1.0, 0.5], colors='k')
     plt.text(25, 0.2, 'h', bbox=dict(boxstyle='round', facecolor='white'))
     if save_plots:
-        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_evap_TH_newAR.png', dpi=300, bbox_inches='tight')
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_dTdt_evap_TH_control.png', dpi=300, bbox_inches='tight')
 
 
-
-
+    # Surface (estimated horizontal) wind speed
+    fig = plt.figure(figsize=(6,4))
+    plt.plot(np.arange(0, ntstp) * delt, sfc_wind, lw=2, color='k')
+    plt.title('Maximum Estimated Surface Wind Speed')
+    plt.xlabel('Time [s]')
+    plt.ylabel('Speed [mph]')
+    plt.xlim(0, delt*ntstp)
+    plt.ylim(0, 80)
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_surface_wind.png', dpi=300, bbox_inches='tight')
+    
+    # Surface temperature and dewpoint
+    fig = plt.figure(figsize=(6,4))
+    plt.plot(np.arange(0, ntstp) * delt, sfc_t, lw=2, label='Temperature', color='red')
+    plt.plot(np.arange(0, ntstp) * delt, sfc_td, lw=2, label='Dewpoint', color='green', linestyle='dashed')
+    plt.legend()
+    plt.title('Surface meteogram')
+    plt.xlabel('Time [s]')
+    plt.ylabel('Temperature [C]')
+    plt.xlim(0, delt*ntstp)
+    plt.ylim(0, 40)
+    if save_plots:
+        plt.savefig('/Users/jacob.carlin/Documents/Data/1D Downburst Model/Figures/casestudy_surface_T_Td.png', dpi=300, bbox_inches='tight')
 
 
 
