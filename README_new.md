@@ -9,7 +9,9 @@
 *** for contributors-url, forks-url, etc. This is an optional, concise syntax you may use.
 *** https://www.markdownguide.org/basic-syntax/#reference-style-links
 -->
+<!--
 [![Issues][issues-shield]][issues-url]
+-->
 [![LinkedIn][linkedin-shield]][linkedin-url]
 
 <br />
@@ -25,9 +27,11 @@
 <h3 align="center">1D Downburst Model</h3>
 
   <p align="center">
-    project_description
+    This code repository houses a Python-based one-dimensional model of downburst development with a coupled polarimetric radar forward operator.
+    <!--
     <br />
     <a href="https://github.com/jacob-carlin/downburst_1d"><strong>Explore the docs »</strong></a>
+    -->
     <br />
     &middot;
     <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
@@ -61,10 +65,12 @@
 
 
 
-<!-- ABOUT THE PROJECT -->
-## About The Project
+<!-- ABOUT THE MODEL -->
+## About The Model
 
-Here's a blank template to get started. To avoid retyping too much info, do a search and replace with your text editor for the following: `github_username`, `repo_name`, `twitter_handle`, `linkedin_username`, `email_client`, `email`, `project_title`, `project_description`, `project_license`
+This model is a Python-based one-dimensional model of downburst development. The physical model is based on the seminal 1D downburst modeling study of [Srivastava (1987)](https://journals.ametsoc.org/view/journals/atsc/44/13/1520-0469_1987_044_1752_amoidd_2_0_co_2.xml). The microphysical processes of graupel and hail melting are based on [Rasmussen and Heymsfield (1987)](https://doi.org/10.1175/1520-0469(1987)973044<2754:MASOGA>2.0.CO;2) and [Ryzhkov et al. (2013)](https://doi.org/10.1175/JAMC-D-13-073.1), while drop shedding is based on [Jost et al. (2019)](https://meetingorganizer.copernicus.org/EGU2019/EGU2019-5125.pdf) and drop breakup is based on [Ryzhkov et al. (2013)](https://doi.org/10.1175/JAMC-D-13-073.1). The coupled polarimetric radar forward operator is based on [Ryzhkov et al. (2011)](https://journals.ametsoc.org/view/journals/apme/50/4/2010jamc2363.1.xml) with modifications based on [Dawson et al. (2014)](https://doi.org/10.1175/JAS-D-13-0118.1), [Kumjian et al. (2018)](https://doi.org/10.1175/JAMC-D-17-0362.1), [Theis et al. (2022)](https://doi.org/10.1175/JAS-D-21-0162.1), and [Lin et al. (2024)](https://doi.org/10.1175/JAS-D-23-0231.1). 
+
+For a detailed physical description of the model and operator, please see Carlin and Ryzhkov (2025). 
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -120,6 +126,7 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 
 
 <!-- ROADMAP -->
+<!--
 ## Roadmap
 
 - [ ] Feature 1
@@ -130,7 +137,7 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 See the [open issues](https://github.com/github_username/repo_name/issues) for a full list of proposed features (and known issues).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
+-->
 
 
 <!-- CONTRIBUTING -->
@@ -149,22 +156,6 @@ Don't forget to give the project a star! Thanks again!
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Top contributors:
-
-<a href="https://github.com/github_username/repo_name/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=github_username/repo_name" alt="contrib.rocks image" />
-</a>
-
-
-
-<!-- LICENSE -->
-## Acknowledgments
-
-This project was funded and supported by National Science Foundation Grant [#AGS2110709](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2110709&HistoricalAwards=false).
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
 
 <!-- CONTACT -->
 ## Contact
@@ -176,15 +167,13 @@ Project Link: [https://github.com/jacob-carlin/downburst_1d](https://github.com/
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
-
 <!-- ACKNOWLEDGMENTS -->
 ## Acknowledgments
 
-* []()
-* []()
-* []()
+Support for this work was provided by National Science Foundation (NSF) Grant [#AGS2110709](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2110709&HistoricalAwards=false) and the NOAA/Office of Oceanic and Atmospheric Research under NOAA-University of Oklahoma Cooperative Agreement [#NA21OAR4320204](https://www.highergov.com/grant/NA21OAR4320204/).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 
 
 
