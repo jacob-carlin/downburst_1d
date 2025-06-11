@@ -12,9 +12,6 @@
 <!--
 [![Issues][issues-shield]][issues-url]
 -->
-[![LinkedIn][linkedin-shield]][linkedin-url]
-
-<br />
 
 <!-- PROJECT LOGO -->
 <!-- 
@@ -24,18 +21,12 @@
   </a>
 -->
 
-<h3 align="center">1D Downburst Model</h3>
-
+<h2 align="center">1D Downburst Model</h2>
   <p align="center">
-    This code repository houses a Python-based one-dimensional model of downburst development with a coupled polarimetric radar forward operator.
-    <!--
     <br />
-    <a href="https://github.com/jacob-carlin/downburst_1d"><strong>Explore the docs »</strong></a>
-    -->
-    <br />
-    &middot;
     <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
   </p>
+
 </div>
 
 
@@ -160,7 +151,7 @@ Don't forget to give the project a star! Thanks again!
 <!-- CONTACT -->
 ## Contact
 
-Jacob Carlin - jacob.carlin@noaa.gov
+Jacob Carlin - jacob.carlin@noaa.gov - [![LinkedIn][linkedin-shield]][linkedin-url]
 
 Project Link: [https://github.com/jacob-carlin/downburst_1d](https://github.com/jacob-carlin/downburst_1d)
 
