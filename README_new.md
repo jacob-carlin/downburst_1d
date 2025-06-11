@@ -24,7 +24,7 @@
 <h2 align="center">1D Downburst Model</h2>
   <p align="center">
     <br />
-    <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    
   </p>
 
 </div>
@@ -130,14 +130,16 @@ See the [open issues](https://github.com/github_username/repo_name/issues) for a
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 -->
 
+## Issue Reporting
+
+If you notice any bugs in the code or unexpected behavior, please report them by filing a report <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">here</a>.
 
 <!-- CONTRIBUTING -->
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+While _active_ development of this code base by the lead developer is expected to cease in the summer of 2025, further contributions are always welcome (especially as our physical understanding of microphysics and downburst development evolves!) and are **greatly appreciated**.
 
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
+If you have a code suggestion that would further improve this model, please either submit an issue report with the tag "enhancement" or, alternatively, fork the repo and create a pull request:
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
@@ -151,7 +153,9 @@ Don't forget to give the project a star! Thanks again!
 <!-- CONTACT -->
 ## Contact
 
-Jacob Carlin - jacob.carlin@noaa.gov - [![LinkedIn][linkedin-shield]][linkedin-url]
+Jacob Carlin
+Email: jacob.carlin@noaa.gov
+[![LinkedIn][linkedin-shield]][linkedin-url]
 
 Project Link: [https://github.com/jacob-carlin/downburst_1d](https://github.com/jacob-carlin/downburst_1d)
 
