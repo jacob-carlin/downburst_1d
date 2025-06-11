@@ -134,6 +134,8 @@ See the [open issues](https://github.com/github_username/repo_name/issues) for a
 
 If you notice any bugs in the code or unexpected behavior, please report them by filing a report <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">here</a>.
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 <!-- CONTRIBUTING -->
 ## Contributing
 
