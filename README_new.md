@@ -36,19 +36,20 @@
   <summary>Table of Contents</summary>
   <ol>
     <li>
-      <a href="#about-the-project">About The Project</a>
+      <a href="#about-the-model">About The Model</a>
     </li>
     <li>
       <a href="#getting-started">Getting Started</a>
       <ul>
         <li><a href="#prerequisites">Prerequisites</a></li>
         <li><a href="#installation">Installation</a></li>
+        <li><a href="#running">Running</a></li>
+        <li><a href="#usage-example">Usage Example</a></li>
       </ul>
     </li>
-    <li><a href="#usage">Usage</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#issue-reporting">Issue Reporting</a></li>
     <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
+    <li><a href="#attribution">Attribution</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="#acknowledgments">Acknowledgments</a></li>
   </ol>
@@ -114,7 +115,7 @@ For ease, the use of Anaconda with the included conda environment is recommended
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Running
+### Running
 
 1. Modify the ``scripts/mh_namelist.py`` file with the requested options and parameters (detailed in the mh_namelist) and save the file.
 
@@ -125,23 +126,19 @@ For ease, the use of Anaconda with the included conda environment is recommended
 
 3. If ``write_netcdf == True`` in ``mh_namelist.py``, the model output will be saved in ``netcdf_path``.
 
-## Attribution
-
-If you use this code in any academic or scientific context, we kindly request attribution be given by citing Carlin and Ryzhkov (2025).
-
 <!-- USAGE EXAMPLES -->
-## Usage Example
+### Usage Example
 
 To conduct an example simulation, the model can be run with these default settings in mh_namelist. 
 
 ```
-delt = 0.5                  # Model time step [s]
-dh = 50.0                   # Vertical grid spacing [m]
-total_t = 1000              # Total model-time length [s]
+delt = 2.0                  # Model time step [s]
+dh = 200.0                  # Vertical grid spacing [m]
+total_t = 500               # Total model-time length [s]
 deld = 0.1                  # dD: Particle bin size interval [mm]
 init_frozen_opt = True      # True = Hail/Graupel
 rg = 600.0                  # Density of pure graupel [kg/m3]
-rs_opt = 3
+rs_opt = 3                  # Variable ice density with rg from D=0 to D=5 mm then linearly interpolated to ri by D=1 cm
 ng0 = 8000                  # Graupel intercept parameter [1/m3/mm]
 lamg = 1.4                  # Graupel slope parameter [1/mm]
 Fsub = 1.9                  # Graupel sublimation enhancement parameter from Theis et al. (2022). 
@@ -157,9 +154,7 @@ sighail = 60.0              # Standard deviation of hail canting angle distribut
 ar_g = 0.9                  # Graupel aspect ratio (Theis et al. 2022)
 verbose = True              # Detailed print statements
 shed_opt = True             # Turn meltwater shedding on/off
-shed_dsd_opt = 0            # 0 = New parameterization based on Theis et al. (2021) (recommended)
-                            # 1 = Original parameterization from Ryzhkov et al. (2013) with mu = 2, lam = 2
-                            #     Note: mu = 3 and lam = 5 also proposed in literature
+shed_dsd_opt = 0            # Shed drop DSD parameterization based on Theis et al. (2021) 
 break_opt = True            # Turn drop breakup on/off
 evap_opt = True             # Turn evaporation on/off
 subl_opt = True             # Turn sublimation on/off
@@ -179,7 +174,57 @@ rh_top = 50.0               # Relative humidity at model top [%]
 gam_rh = 0.0                # Relative humidity lapse rate [%/km] 
 ```
 
-_For more examples, please refer to the [Documentation](https://example.com)_
+```
+python ./scripts/downdraft_model_cleaned.py
+```
+
+```
+Working directory:  /Users/jacob.carlin/Documents/Data/downburst_1d/
+
+## You are using the Python ARM Radar Toolkit (Py-ART), an open source
+## library for working with weather radar data. Py-ART is partly
+## supported by the U.S. Department of Energy as part of the Atmospheric
+## Radiation Measurement (ARM) Climate Research Facility, an Office of
+## Science user facility.
+##
+## If you use this software to prepare a publication, please cite:
+##
+##     JJ Helmus and SM Collis, JORS 2016, doi: 10.5334/jors.119
+
+Graupel Lamda:  1.4 mm-1
+Graupel Intercept:  8000 m-3 mm-1
+Hail Lamda:  0.3 mm-1
+Hail Intercept:  1.5 m-3 mm-1
+Maximum Hail Size:  20 mm
+Variable-density ice
+Environment: Idealized
+T0:  273.15 C
+Temperature lapse rate:  9.0 C/km
+RH0:  50.0 %
+RH lapse rate: 0.0 %/km
+Initial air density: 0.8047105807842989
+Time:  0.0 s |  Minimum w:  -1.0 m/s
+Initial IWC:  4.380679167502768  g/m3
+Time:  2.0 s |  Minimum w:  -1.0 m/s
+Time:  4.0 s |  Minimum w:  -1.0 m/s
+Time:  6.0 s |  Minimum w:  -1.0 m/s
+Time:  8.0 s |  Minimum w:  -1.0 m/s
+Time:  10.0 s |  Minimum w:  -1.0 m/s
+Time:  12.0 s |  Minimum w:  -1.0 m/s
+Time:  14.0 s |  Minimum w:  -1.0 m/s
+Time:  16.0 s |  Minimum w:  -1.0 m/s
+Time:  18.0 s |  Minimum w:  -1.0 m/s
+.
+.
+.
+Calculating radar variables for tstp  246
+Calculating radar variables for tstp  247
+Calculating radar variables for tstp  248
+Total runtime:  0:01:37.066282
+/Users/jacob.carlin/Documents/Data/downburst_1d/scripts/downdraft_model_cleaned.py:2329: ComplexWarning: Casting complex values to real discards the imaginary part
+  nc_deli[:, :, :] = deli[:, :, :]
+netCDF output file written!
+```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -222,13 +267,18 @@ If you have a code suggestion that would further improve this model, please eith
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
+## Attribution
+
+If you use this code in any academic or scientific context, we kindly request attribution be given by citing Carlin and Ryzhkov (2025).
+
+
 <!-- CONTACT -->
 ## Contact
 
 Jacob Carlin
-<br />
+
 Email: jacob.carlin@noaa.gov
-<br />
+
 [![LinkedIn][linkedin-shield]][linkedin-url]
 
 Project Link: [https://github.com/jacob-carlin/downburst_1d](https://github.com/jacob-carlin/downburst_1d)
