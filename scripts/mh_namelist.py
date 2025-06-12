@@ -14,9 +14,9 @@ from datetime import datetime
 ###############################################################################
 # Model parameters
 ###############################################################################
-delt = 0.5                   # Model time step [s]
-dh = 50.0                    # Vertical grid spacing [m]
-total_t = 700                # Total model-time length [s]
+delt = 2.0                   # Model time step [s]
+dh = 200.0                    # Vertical grid spacing [m]
+total_t = 500               # Total model-time length [s]
 ntstp = int(total_t / delt)  # Number of timestamps
 
 ###############################################################################
@@ -159,17 +159,15 @@ evap_opt = True             # Turn evaporation on/off
 subl_opt = True             # Turn sublimation on/off
 radar_opt = True           # Turn radar variable calculation on/off
 generate_lut = False        # Flag to generate LUT (only applies if radar_opt = True) -- DEFAULT FALSE
-use_lut = True              # Flag to use LUT (only applies if radar_opt = True) -- DEFAULT TRUE
-use_2layer = True           # Flag to use 2-layer LUT (only applies if radar_opt = True) -- DEFAULT TRUE
-lut_path = '../data/scattering_lut_sband.nc'
-twolayer_lut_path = '../data/Tmatrix_2layer_LUT_variableT.nc'
+use_lut = False              # Flag to use LUT (only applies if radar_opt = True) -- DEFAULT TRUE
+use_2layer = False           # Flag to use 2-layer LUT (only applies if radar_opt = True) -- DEFAULT TRUE
+lut_path = '/data/scattering_lut_sband.nc'
+twolayer_lut_path = '/data/Tmatrix_2layer_LUT_variableT.nc'
 #tp_eq_adj_opt = True       # Adjustment to particle temperature due to nonequilibrium
                             # owing to terminal velocity and small grid size (e.g.,
                             # Tardis and Rasmussen 2010)
 write_netcdf = True
-netcdf_path = '../results/control.nc'    
-make_plots = False
-save_plots = False
+netcdf_path = '/results/control.nc'    
 
 ###############################################################################
 # Initial environment for idealized runs
