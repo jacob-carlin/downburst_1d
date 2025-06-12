@@ -74,11 +74,25 @@ To get a local copy up and running follow these simple example steps.
 
 ### Prerequisites
 
-This is an example of how to list things you need to use the software and how to install them.
-* npm
-  ```sh
-  npm install npm@latest -g
-  ```
+The following packages are required:
+```
+arm_pyart==1.18.3
+Cartopy==0.22.0
+matplotlib==3.8.4
+MetPy==1.6.2
+netCDF4==1.6.5
+netCDF4==1.7.2
+numpy==2.3.0
+pandas==2.3.0
+pygrib==2.1.5
+Requests==2.32.4
+scipy==1.15.3
+setuptools==69.5.1
+siphon==0.9
+xarray==2023.6.0
+```
+
+For ease, the use of the included conda environment is recommended.
 
 ### Installation
 
@@ -135,6 +149,7 @@ See the [open issues](https://github.com/github_username/repo_name/issues) for a
 If you notice any bugs in the code or unexpected behavior, please report them by filing a report <a href="https://github.com/jacob-carlin/downburst_1d/issues/new?labels=bug&template=bug-report---.md">here</a>.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 
 <!-- CONTRIBUTING -->
 ## Contributing
