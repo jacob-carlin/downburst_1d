@@ -113,6 +113,8 @@ For ease, the use of Anaconda with the included conda environment is recommended
    git remote -v # confirm the changes
    ```
 
+Note: Options exist in the namelist for using 2-layer T-matrix scattering calculations from a look-up table (LUT), which is the default recommended process. This file is very large (>200 MB) and is unable to be hosted on Github. If T-matrix (i.e., non-Rayleigh) scattering calculations are desired, please contact the creator. 
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Running
