@@ -69,8 +69,7 @@ For a detailed physical description of the model and operator, please see Carlin
 <!-- GETTING STARTED -->
 ## Getting Started
 
-This is an example of how you may give instructions on setting up your project locally.
-To get a local copy up and running follow these simple example steps.
+To download a copy of the code and run the model locally, follow the below instructions.
 
 ### Prerequisites
 
@@ -81,7 +80,6 @@ Cartopy==0.22.0
 matplotlib==3.8.4
 MetPy==1.6.2
 netCDF4==1.6.5
-netCDF4==1.7.2
 numpy==2.3.0
 pandas==2.3.0
 pygrib==2.1.5
@@ -92,37 +90,94 @@ siphon==0.9
 xarray==2023.6.0
 ```
 
-For ease, the use of the included conda environment is recommended.
+For ease, the use of Anaconda with the included conda environment is recommended.
 
 ### Installation
 
-1. Get a free API Key at [https://example.com](https://example.com)
-2. Clone the repo
-   ```sh
-   git clone https://github.com/github_username/repo_name.git
+1. Clone the repo
    ```
-3. Install NPM packages
-   ```sh
-   npm install
+   git clone https://github.com/jacob-carlin/downburst_1d.git
    ```
-4. Enter your API in `config.js`
-   ```js
-   const API_KEY = 'ENTER YOUR API';
+2. If using Anaconda, navigate to the repository director and load the conda environment
    ```
-5. Change git remote url to avoid accidental pushes to base project
+   conda env create -f ./environment.yml
+   ```
+3. Activate the conda environment
+   ```
+   conda activate 1d_downburst_model
+   ```
+4. Change git remote url to avoid accidental pushes to base project
    ```sh
-   git remote set-url origin github_username/repo_name
+   git remote set-url origin jacob-carlin/downburst_1d
    git remote -v # confirm the changes
    ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+## Running
 
+1. Modify the ``scripts/mh_namelist.py`` file with the requested options and parameters (detailed in the mh_namelist) and save the file.
+
+2. Open a Terminal, navigate to the directory containing the repository, and run
+   ```
+   python ./scripts/downburst_model_cleaned.py
+   ```
+
+3. If ``write_netcdf == True`` in ``mh_namelist.py``, the model output will be saved in ``netcdf_path``.
+
+## Attribution
+
+If you use this code in any academic or scientific context, we kindly request attribution be given by citing Carlin and Ryzhkov (2025).
 
 <!-- USAGE EXAMPLES -->
-## Usage
+## Usage Example
 
-Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources.
+To conduct an example simulation, the model can be run with these default settings in mh_namelist. 
+
+```
+delt = 0.5                  # Model time step [s]
+dh = 50.0                   # Vertical grid spacing [m]
+total_t = 1000              # Total model-time length [s]
+deld = 0.1                  # dD: Particle bin size interval [mm]
+init_frozen_opt = True      # True = Hail/Graupel
+rg = 600.0                  # Density of pure graupel [kg/m3]
+rs_opt = 3
+ng0 = 8000                  # Graupel intercept parameter [1/m3/mm]
+lamg = 1.4                  # Graupel slope parameter [1/mm]
+Fsub = 1.9                  # Graupel sublimation enhancement parameter from Theis et al. (2022). 
+nh0 = 1.5                   # Hail intercept parameter [1/m3/mm]
+lamh = 0.3                  # Hail slope parameter [mm-1]
+dmax_limit = 20             # Maximum hail size [mm]
+hail_dist_opt = 5           # Custom hail size distribution
+ar_opt = 1                  # Aspect ratio parameterization of Kumjian et al. (2018) + Theis et al. (2022)
+sigma_opt = 2               # Melting hail canting angle parameterization of Dawson et al. (2014)
+waveflag = 0                # Radar wavelength -- S band (10.97 cm)
+sigrain = 10.0              # Standard deviation of rain canting angle distribution [deg]
+sighail = 60.0              # Standard deviation of hail canting angle distribution [deg]
+ar_g = 0.9                  # Graupel aspect ratio (Theis et al. 2022)
+verbose = True              # Detailed print statements
+shed_opt = True             # Turn meltwater shedding on/off
+shed_dsd_opt = 0            # 0 = New parameterization based on Theis et al. (2021) (recommended)
+                            # 1 = Original parameterization from Ryzhkov et al. (2013) with mu = 2, lam = 2
+                            #     Note: mu = 3 and lam = 5 also proposed in literature
+break_opt = True            # Turn drop breakup on/off
+evap_opt = True             # Turn evaporation on/off
+subl_opt = True             # Turn sublimation on/off
+radar_opt = True            # Turn radar variable calculation on/off
+generate_lut = False        # Flag to generate LUT (only applies if radar_opt = True) -- DEFAULT FALSE
+use_lut = True              # Flag to use LUT (only applies if radar_opt = True) -- DEFAULT TRUE
+use_2layer = True           # Flag to use 2-layer LUT (only applies if radar_opt = True) -- DEFAULT TRUE
+lut_path = '../data/scattering_lut_sband.nc'
+twolayer_lut_path = '../data/Tmatrix_2layer_LUT_variableT.nc'
+write_netcdf = True
+netcdf_path = '../results/control.nc'   
+profile_opt = 0             # Idealized environment
+h0 = 4000                   # Model top [m]
+t_top = 0.0                 # Temperature at model top [C]
+gam = 9.0                   # Temperature lapse rate [C/km]
+rh_top = 50.0               # Relative humidity at model top [%]
+gam_rh = 0.0                # Relative humidity lapse rate [%/km] 
+```
 
 _For more examples, please refer to the [Documentation](https://example.com)_
 
@@ -171,7 +226,9 @@ If you have a code suggestion that would further improve this model, please eith
 ## Contact
 
 Jacob Carlin
+<br />
 Email: jacob.carlin@noaa.gov
+<br />
 [![LinkedIn][linkedin-shield]][linkedin-url]
 
 Project Link: [https://github.com/jacob-carlin/downburst_1d](https://github.com/jacob-carlin/downburst_1d)
