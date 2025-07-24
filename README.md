@@ -271,7 +271,7 @@ If you have a code suggestion that would further improve this model, please eith
 
 ## Attribution
 
-If you use this code in any academic or scientific context, we kindly request attribution be given by citing Carlin and Ryzhkov (2025).
+If you use this code in any academic or scientific context, we kindly request attribution be given by citing [Carlin and Ryzhkov (2025)](https://journals.ametsoc.org/view/journals/atsc/aop/JAS-D-25-0014.1/JAS-D-25-0014.1.xml).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
